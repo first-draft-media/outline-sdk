@@ -11,47 +11,113 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+import { exec, execFile } from 'node:child_process'
+import fs, { promises as fsp } from 'node:fs'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 
-import { exec, execFile } from "node:child_process";
-import { glob } from "glob";
-import { promisify } from "node:util";
-import chalk from "chalk";
-import archiver from "archiver";
-import { promises as fsp } from 'fs';
-import fs from "node:fs";
-import handlebars from "handlebars";
-import path from "node:path";
-import minimist from "minimist";
-import YAML from 'yaml';
+import archiver from 'archiver'
+import chalk from 'chalk'
+import { glob } from 'glob'
+import handlebars from 'handlebars'
+import minimist from 'minimist'
+import YAML from 'yaml'
 
-const OUTPUT_DIR = path.join(process.cwd(), "output");
-const WRAPPER_APP_TEMPLATE_DIR = path.join(
-  process.cwd(),
-  "wrapper_app_project/template",
-);
+const CWD = process.cwd()
+const OUTPUT_TARGET = path.join(CWD, 'output')
+const TEMPLATE = path.join(CWD, 'wrapper_app_project/template');
 
-const DEFAULT_SMART_DIALER_CONFIG = {
-  dns: [{
-    https: { name: "9.9.9.9" },
-  }],
-  tls: ["", "split:1", "split:2", "tlsfrag:1"],
-};
+/**
+ * GUARDS
+ **/
 
-const SMART_DIALER_CONFIG = await (async () => {
+/* See https://stackoverflow.com/questions/57838022/detect-whether-es-module-is-run-from-command-line-in-node*/
+if (import.meta.url !== pathToFileURL(`${process.argv[1]}`).href) {
+  throw new Error('Build script must be run from the cli')
+}
+
+/**
+ * Read build configuration
+ **/
+
+const DEFAULT_CONFIG = {
+  smartDialerConfig: JSON.stringify({
+    dns: [
+      {
+        https: { name: "9.9.9.9" }
+      }
+    ],
+    tls: [
+      "",
+      "split:1",
+      "split:2",
+      "tlsfrag:1"
+    ],   
+  })
+}
+
+// console.log(DEFAULT_CONFIG)
+
+const YAML_CONFIG = await (async () => {
   const data = await fsp.readFile('config.yaml', 'utf8')
     .catch((e) => {
-      if (e?.code === 'ENOENT') { return undefined; }
-      else if (e) { throw new Error(e); }
-    });
-  
-  if (!data) return undefined;
-  
-  const dict = YAML.parse(data);
-  const config = dict?.smartDialerConfig;
+      if (e?.code === 'ENOENT') {
+        return undefined
+      } else if (e) {
+        throw new Error(e)
+      }
+    })
+  if (data) {
+    const dict = YAML.parse(data)
+    return {
+      ...dict, 
+      smartDialerConfig: dict.smartDialerConfig && JSON.stringify(dict.smartDialerConfig)
+    }
+  }
+})()
 
-  return config ? JSON.stringify(config) : undefined;
-})() ?? JSON.stringify(DEFAULT_SMART_DIALER_CONFIG);
+// console.log(YAML_CONFIG)
 
+/**
+ * Parse cli arguments; invoke the main build function 
+ **/  
+ 
+const CLI_CONFIG = (() => {
+  const args = minimist(process.argv.slice(2));
+  return {
+    ...args,
+    additionalDomains: args.additionalDomains?.split(',') ?? []
+  }
+})()
+
+// console.log(CLI_CONFIG)
+
+const CONFIG = {
+  ...DEFAULT_CONFIG,
+  ...YAML_CONFIG,
+  ...CLI_CONFIG
+}
+
+if (!CONFIG.platform) {
+  throw new Error(`Parameter \`--platform\` not provided.`);
+}
+
+if (!CONFIG.entryUrl) {
+  throw new Error(`Parameter \`--entryUrl\` not provided.`);
+}
+
+console.log(CONFIG)
+
+
+main(CONFIG)
+  .catch(console.error);
+
+/***
+ * DEFAULT EXPORT / BUILD ROUTINE
+ **/
+
+// Why do this is we can only be run as a script anyway?
 export default async function main(
   {
     additionalDomains = [],
@@ -59,24 +125,24 @@ export default async function main(
     appName,
     entryUrl = "https://www.example.com",
     navigationUrl,
-    output = OUTPUT_DIR,
+    output = OUTPUT_TARGET,
     platform,
     smartDialerConfig = SMART_DIALER_CONFIG,
   },
 ) {
-  const WRAPPER_APP_OUTPUT_DIR = path.resolve(output, "wrapper_app_project");
+  const WRAPPER_APP_OUTPUT_TARGET = path.resolve(output, "wrapper_app_project");
   const WRAPPER_APP_OUTPUT_ZIP = path.resolve(
     output,
     "wrapper_app_project.zip",
   );
 
-  const SDK_MOBILEPROXY_OUTPUT_DIR = path.resolve(output, "mobileproxy");
+  const SDK_MOBILEPROXY_OUTPUT_TARGET = path.resolve(output, "mobileproxy");
   const WRAPPER_APP_OUTPUT_SDK_MOBILEPROXY_DIR = path.resolve(
-    WRAPPER_APP_OUTPUT_DIR,
+    WRAPPER_APP_OUTPUT_TARGET,
     "mobileproxy",
   );
 
-  if (!fs.existsSync(SDK_MOBILEPROXY_OUTPUT_DIR)) {
+  if (!fs.existsSync(SDK_MOBILEPROXY_OUTPUT_TARGET)) {
     console.log(
       `Building the Outline SDK mobileproxy library for ${platform}...`,
     );
@@ -90,7 +156,7 @@ export default async function main(
   }
 
   const sourceFilepaths = await glob(
-    path.join(WRAPPER_APP_TEMPLATE_DIR, "**", "*"),
+    path.join(TEMPLATE, "**", "*"),
     {
       nodir: true,
       dot: true,
@@ -117,9 +183,9 @@ export default async function main(
 
   for (const sourceFilepath of sourceFilepaths) {
     const destinationFilepath = path.join(
-      WRAPPER_APP_OUTPUT_DIR,
+      WRAPPER_APP_OUTPUT_TARGET,
       path.relative(
-        WRAPPER_APP_TEMPLATE_DIR,
+        TEMPLATE,
         sourceFilepath,
       ),
     );
@@ -146,20 +212,20 @@ export default async function main(
   console.log("Copying mobileproxy files into the project...");
 
   fs.cpSync(
-    SDK_MOBILEPROXY_OUTPUT_DIR,
+    SDK_MOBILEPROXY_OUTPUT_TARGET,
     WRAPPER_APP_OUTPUT_SDK_MOBILEPROXY_DIR,
     { recursive: true },
   );
 
   console.log("Installing external dependencies for the project...");
   await promisify(exec)(`
-    cd ${WRAPPER_APP_OUTPUT_DIR.replaceAll(" ", "\\ ")}
+    cd ${WRAPPER_APP_OUTPUT_TARGET.replaceAll(" ", "\\ ")}
     npm install
     npx cap sync ${platform}
   `);
 
   console.log(`Zipping project to ${chalk.blue(WRAPPER_APP_OUTPUT_ZIP)}...`);
-  await zip(WRAPPER_APP_OUTPUT_DIR, WRAPPER_APP_OUTPUT_ZIP);
+  await zip(WRAPPER_APP_OUTPUT_TARGET, WRAPPER_APP_OUTPUT_ZIP);
 
   console.log("Project ready!");
 }
@@ -189,7 +255,7 @@ function resolveTemplateArguments(
     appName,
     navigationUrl,
     additionalDomains,
-    smartDialerConfig = DEFAULT_SMART_DIALER_CONFIG,
+    smartDialerConfig,
   },
 ) {
   const result = {
@@ -242,22 +308,4 @@ function resolveTemplateArguments(
   result.smartDialerConfig = Buffer.from(smartDialerConfig).toString("base64");
 
   return result;
-}
-
-if (decodeURI(import.meta.url).endsWith(process.argv[1])) {
-  const args = minimist(process.argv.slice(2));
-
-  if (!args.platform) {
-    throw new Error(`Parameter \`--platform\` not provided.`);
-  }
-
-  if (!args.entryUrl) {
-    throw new Error(`Parameter \`--entryUrl\` not provided.`);
-  }
-
-  main({
-    ...args,
-    additionalDomains: args.additionalDomains?.split(/,\s*/) ?? [],
-  })
-    .catch(console.error);
 }
