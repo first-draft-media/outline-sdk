@@ -12,21 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 import { exec, execFile } from 'node:child_process'
-import fs from 'node:fs'
+import fs, { promises as fsp } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
-import archiver from 'archiver'
 import chalk from 'chalk'
 import { glob } from 'glob'
 import handlebars from 'handlebars'
 
-const CWD = process.cwd()
-const OUTPUT_TARGET = path.join(CWD, 'output')
-const TEMPLATE = path.join(CWD, 'wrapper_app_project/template');
+const TEMPLATE = path.join(process.cwd(), 'wrapper_app_project/template');
 
 import { getCliConfig, getFileConfig, DEFAULT_CONFIG } from './config.mjs'
+import { resolveTemplateArguments, zip } from './util.mjs'
 
 /* See https://stackoverflow.com/questions/57838022/detect-whether-es-module-is-run-from-command-line-in-node*/
 if (import.meta.url !== pathToFileURL(`${process.argv[1]}`).href) {
@@ -47,66 +45,25 @@ if (!CONFIG.entryUrl) {
   throw new Error(`Parameter \`--entryUrl\` not provided.`);
 }
 
-console.log(CONFIG)
-
-
-main(CONFIG)
-  .catch(console.error);
-
-/***
- * DEFAULT EXPORT / BUILD ROUTINE
+/**
+ * 
  **/
-
-// Why do this is we can only be run as a script anyway?
-export default async function main(
+async function main(
   {
-    additionalDomains = [],
+    additionalDomains,
     appId,
     appName,
-    entryUrl = "https://www.example.com",
+    entryUrl,
     navigationUrl,
-    output = OUTPUT_TARGET,
+    output,
     platform,
-    smartDialerConfig = SMART_DIALER_CONFIG,
+    smartDialerConfig,
   },
 ) {
-  const WRAPPER_APP_OUTPUT_TARGET = path.resolve(output, "wrapper_app_project");
-  const WRAPPER_APP_OUTPUT_ZIP = path.resolve(
-    output,
-    "wrapper_app_project.zip",
-  );
-
-  const SDK_MOBILEPROXY_OUTPUT_TARGET = path.resolve(output, "mobileproxy");
-  const WRAPPER_APP_OUTPUT_SDK_MOBILEPROXY_DIR = path.resolve(
-    WRAPPER_APP_OUTPUT_TARGET,
-    "mobileproxy",
-  );
-
-  if (!fs.existsSync(SDK_MOBILEPROXY_OUTPUT_TARGET)) {
-    console.log(
-      `Building the Outline SDK mobileproxy library for ${platform}...`,
-    );
-
-    await promisify(execFile)("npm", [
-      "run",
-      "build:mobileproxy",
-      platform,
-      output,
-    ], { shell: false });
-  }
-
-  const sourceFilepaths = await glob(
-    path.join(TEMPLATE, "**", "*"),
-    {
-      nodir: true,
-      dot: true,
-    },
-  );
-
-  console.log("Building project from template...");
-
-  let templateArguments;
-
+  
+  /** TO REVIEW> */
+  let templateArguments
+  
   try {
     templateArguments = resolveTemplateArguments(platform, entryUrl, {
       additionalDomains,
@@ -114,12 +71,40 @@ export default async function main(
       appName,
       navigationUrl,
       smartDialerConfig,
-    });
+    })
   } catch (cause) {
     throw new TypeError("Failed to resolve the project template arguments", {
       cause,
-    });
+    })
   }
+  /** <TO REVIEW */
+  
+  
+  /** can't we do something with appName */
+  const WRAPPER_APP_OUTPUT_TARGET = path.resolve(output, "wrapper_app_project")
+  const WRAPPER_APP_OUTPUT_ZIP = path.resolve(output, "wrapper_app_project.zip")
+
+  const SDK_MOBILEPROXY_OUTPUT_TARGET = path.resolve(output, "mobileproxy")
+  const WRAPPER_APP_OUTPUT_SDK_MOBILEPROXY_DIR = path.resolve(WRAPPER_APP_OUTPUT_TARGET, "mobileproxy")
+
+  try {
+    await fsp.access(SDK_MOBILEPROXY_OUTPUT_TARGET, fsp.constants.F_OK)
+  } catch (err) {
+    console.log(chalk.green(`Building the Outline SDK mobileproxy library for ${platform}...`))
+    await promisify(execFile)("npm", ["run", "build:mobileproxy", platform, output])
+  }
+
+  /** HERE WE ARE... */
+
+  const sourceFilepaths = await glob(
+    path.join(TEMPLATE, "**", "*"),
+    {
+      nodir: true,
+      dot: true,
+    },
+  )
+
+  console.log(chalk.green("Building project from template..."))
 
   for (const sourceFilepath of sourceFilepaths) {
     const destinationFilepath = path.join(
@@ -149,7 +134,7 @@ export default async function main(
     );
   }
 
-  console.log("Copying mobileproxy files into the project...");
+  console.log(chalk.gray("Copying mobileproxy files into the project..."))
 
   fs.cpSync(
     SDK_MOBILEPROXY_OUTPUT_TARGET,
@@ -157,95 +142,17 @@ export default async function main(
     { recursive: true },
   );
 
-  console.log("Installing external dependencies for the project...");
+  console.log(chalk.gray("Installing external dependencies for the project..."))
   await promisify(exec)(`
     cd ${WRAPPER_APP_OUTPUT_TARGET.replaceAll(" ", "\\ ")}
     npm install
     npx cap sync ${platform}
   `);
 
-  console.log(`Zipping project to ${chalk.blue(WRAPPER_APP_OUTPUT_ZIP)}...`);
+  console.log(chalk.gray(`Zipping project to ${chalk.blue(WRAPPER_APP_OUTPUT_ZIP)}...`))
   await zip(WRAPPER_APP_OUTPUT_TARGET, WRAPPER_APP_OUTPUT_ZIP);
 
-  console.log("Project ready!");
+  console.log(chalk.bgGreen("Project ready!"))
 }
 
-function zip(root, destination) {
-  const job = archiver("zip", { zlib: { level: 9 } });
-  const destinationStream = fs.createWriteStream(destination);
-
-  return new Promise((resolve, reject) => {
-    job.directory(root, false);
-    job.pipe(destinationStream);
-
-    destinationStream.on("close", resolve);
-
-    job.on("error", reject);
-    destinationStream.on("error", reject);
-
-    job.finalize();
-  });
-}
-
-function resolveTemplateArguments(
-  platform,
-  entryUrl,
-  {
-    appId,
-    appName,
-    navigationUrl,
-    additionalDomains,
-    smartDialerConfig,
-  },
-) {
-  const result = {
-    platform,
-    entryUrl,
-    entryDomain: new URL(entryUrl).hostname,
-  };
-
-  if (!appId) {
-    // Infer an app ID from the entry domain by reversing it (e.g. `www.example.com` becomes `com.example.www`)
-    // It must be lower case, and hyphens are not allowed.
-    result.appId = result.entryDomain.replaceAll("-", "")
-      .toLocaleLowerCase().split(".").reverse().join(".");
-  }
-
-  if (!appName) {
-    // Infer an app name from the base entry domain part by title casing the root domain:
-    // (e.g. `www.my-example-app.com` becomes "My Example App")
-    const rootDomain = result.entryDomain.split(".").reverse()[1];
-
-    result.appName = rootDomain.toLocaleLowerCase().replaceAll(
-      /\w[a-z0-9]*[-_]*/g,
-      (match) => {
-        match = match.replace(/[-_]+/, " ");
-
-        return match.charAt(0).toUpperCase() + match.slice(1).toLowerCase();
-      },
-    );
-  }
-
-  if (navigationUrl) {
-    result.entryUrl = navigationUrl;
-    result.entryDomain = new URL(navigationUrl).hostname;
-  }
-
-  if (typeof additionalDomains === "string") {
-    result.additionalDomains = additionalDomains.split(/,\s*/);
-    result.domainList = [result.entryDomain, ...result.additionalDomains].join(
-      "\\n",
-    );
-  } else if (typeof additionalDomains === "object") {
-    result.additionalDomains = additionalDomains;
-    result.domainList = [result.entryDomain, ...result.additionalDomains].join(
-      "\\n",
-    );
-  } else {
-    result.domainList = [result.entryDomain];
-  }
-
-  result.smartDialerConfig = Buffer.from(smartDialerConfig).toString("base64");
-
-  return result;
-}
+main(CONFIG)
