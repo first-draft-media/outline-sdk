@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 import { exec, execFile } from 'node:child_process'
-import fs, { promises as fsp } from 'node:fs'
+import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
@@ -21,82 +21,22 @@ import archiver from 'archiver'
 import chalk from 'chalk'
 import { glob } from 'glob'
 import handlebars from 'handlebars'
-import minimist from 'minimist'
-import YAML from 'yaml'
 
 const CWD = process.cwd()
 const OUTPUT_TARGET = path.join(CWD, 'output')
 const TEMPLATE = path.join(CWD, 'wrapper_app_project/template');
 
-/**
- * GUARDS
- **/
+import { getCliConfig, getFileConfig, DEFAULT_CONFIG } from './config.mjs'
 
 /* See https://stackoverflow.com/questions/57838022/detect-whether-es-module-is-run-from-command-line-in-node*/
 if (import.meta.url !== pathToFileURL(`${process.argv[1]}`).href) {
   throw new Error('Build script must be run from the cli')
 }
 
-/**
- * Read build configuration
- **/
-
-const DEFAULT_CONFIG = {
-  smartDialerConfig: JSON.stringify({
-    dns: [
-      {
-        https: { name: "9.9.9.9" }
-      }
-    ],
-    tls: [
-      "",
-      "split:1",
-      "split:2",
-      "tlsfrag:1"
-    ],   
-  })
-}
-
-// console.log(DEFAULT_CONFIG)
-
-const YAML_CONFIG = await (async () => {
-  const data = await fsp.readFile('config.yaml', 'utf8')
-    .catch((e) => {
-      if (e?.code === 'ENOENT') {
-        return undefined
-      } else if (e) {
-        throw new Error(e)
-      }
-    })
-  if (data) {
-    const dict = YAML.parse(data)
-    return {
-      ...dict, 
-      smartDialerConfig: dict.smartDialerConfig && JSON.stringify(dict.smartDialerConfig)
-    }
-  }
-})()
-
-// console.log(YAML_CONFIG)
-
-/**
- * Parse cli arguments; invoke the main build function 
- **/  
- 
-const CLI_CONFIG = (() => {
-  const args = minimist(process.argv.slice(2));
-  return {
-    ...args,
-    additionalDomains: args.additionalDomains?.split(',') ?? []
-  }
-})()
-
-// console.log(CLI_CONFIG)
-
 const CONFIG = {
   ...DEFAULT_CONFIG,
-  ...YAML_CONFIG,
-  ...CLI_CONFIG
+  ...(await getFileConfig('config.yaml')),
+  ...getCliConfig(process.argv)
 }
 
 if (!CONFIG.platform) {
