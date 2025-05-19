@@ -4,6 +4,7 @@ import path from 'node:path'
 import minimist from 'minimist'
 import YAML from 'yaml'
 
+
 export const DEFAULT_CONFIG = {
   output: path.join(process.cwd(), 'output'),
   smartDialerConfig: JSON.stringify({
@@ -24,11 +25,7 @@ export const DEFAULT_CONFIG = {
 export async function getFileConfig(filepath) {
   const data = await fs.readFile(filepath, 'utf8')
   if (data) {
-	const dict = YAML.parse(data)
-	return {
-	  ...dict, 
-	  smartDialerConfig: dict.smartDialerConfig && JSON.stringify(dict.smartDialerConfig)
-	}
+	return YAML.parse(data)
   }
 }
 
