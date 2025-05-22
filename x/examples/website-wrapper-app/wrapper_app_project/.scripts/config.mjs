@@ -22,17 +22,24 @@ export const DEFAULT_CONFIG = {
   })
 }
 
-export async function getYAMLFileConfig(filepath) {
-  const data = await fs.readFile(filepath, 'utf8')
-  if (data) {
-    return YAML.parse(data)
-  }
-}
-
 export function getCliConfig(args) {
   const dict = minimist(args)
   return {
     ...dict,
     additionalDomains: dict.additionalDomains?.split(',') ?? []
+  }
+}
+
+export async function getManifestConfig(entryUrl) {
+  const url = new URL(entryUrl)
+  const location = new URL('manifest.json', url.origin)
+  const response = await fetch(location)
+  
+}
+
+export async function getYAMLFileConfig(filepath) {
+  const data = await fs.readFile(filepath, 'utf8')
+  if (data) {
+    return YAML.parse(data)
   }
 }
