@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
+import * as cheerio from 'cheerio'
 import minimist from 'minimist'
 import YAML from 'yaml'
 
@@ -32,9 +33,15 @@ export function getCliConfig(args) {
 
 export async function getManifestConfig(entryUrl) {
   const url = new URL(entryUrl)
-  const location = new URL('manifest.json', url.origin)
-  const response = await fetch(location)
-  
+  const entryResponse = await fetch(url)
+  const headers = entryResponse.headers
+  const $ = cheerio.load(await entryResponse.text())
+  const $manifest = $('link[rel=manifest]')
+  const manifestLocation = new URL($manifest[0].attribs.href, url)
+  const manifestResponse = await fetch(manifestLocation)
+  const manifest = await manifestResponse.text()
+  //console.log(headers)
+  console.log(manifest)
 }
 
 export async function getYAMLFileConfig(filepath) {

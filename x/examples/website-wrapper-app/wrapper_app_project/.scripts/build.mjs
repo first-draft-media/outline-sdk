@@ -21,7 +21,7 @@ import chalk from 'chalk'
 import { glob } from 'glob'
 import handlebars from 'handlebars'
 
-import { getCliConfig, getYAMLFileConfig, DEFAULT_CONFIG } from './config.mjs'
+import { getCliConfig, getManifestConfig, getYAMLFileConfig, DEFAULT_CONFIG } from './config.mjs'
 import { resolveConfiguration, zip } from './util.mjs'
 
 const TEMPLATE_DIR = path.join(process.cwd(), 'wrapper_app_project/template');
@@ -35,8 +35,11 @@ if (import.meta.url !== pathToFileURL(`${process.argv[1]}`).href) {
 const config = resolveConfiguration({
   ...DEFAULT_CONFIG,
   ...(await getYAMLFileConfig('config.yaml')),
+  ...(await getManifestConfig('https://www.radiozamaneh.com/')),
   ...getCliConfig(process.argv)
 })
+
+throw(new Error('Tot hier en niet verder'))
 
 const APP_TARGET_DIR = path.resolve(config.output, config.appName)
 const APP_TARGET_ZIP = path.resolve(config.output, `${config.appName}.zip`)
