@@ -39,9 +39,30 @@ export async function getManifestConfig(entryUrl) {
   const $manifest = $('link[rel=manifest]')
   const manifestLocation = new URL($manifest[0].attribs.href, url)
   const manifestResponse = await fetch(manifestLocation)
-  const manifest = await manifestResponse.text()
-  //console.log(headers)
-  console.log(manifest)
+  const manifest = await manifestResponse.json()
+  //  console.log(headers)
+  // console.log(manifest)
+  // pull appropriate media from the server
+  
+  const start_url = manifest.start_url ? new URL(manifest.start_url, entryUrl) : undefined
+  
+  // fetch icons
+  if (isArray(manifest.icons) {
+  }
+
+  const return_val = {
+    //...(), // platform (no relevant field in manifest.json)
+    ...(start_url ? {entyrUrl: start_url.href} : {}), // entryUrl (wholly specified on the cli; even to fetch manifest.json)
+    ...(start_url ? {entryDomain: start_url.origin} : {}), // entryDomain
+    ...(manifest.name ? {name: manifest.name} : {}), // appName
+    //...(), // appId
+    //...(), // additionalDomains
+    //...(), // domainList
+    //...(), // smartDialerConfig (no relevant field in manifest.json)
+    //...(), // output (seems very silly here!)
+  }
+  console.log(return_val)
+  return return_val
 }
 
 export async function getYAMLFileConfig(filepath) {
