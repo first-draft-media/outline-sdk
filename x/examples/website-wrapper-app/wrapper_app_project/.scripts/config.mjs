@@ -47,7 +47,7 @@ export async function getManifestConfig(entryUrl) {
   const start_url = manifest.start_url ? new URL(manifest.start_url, entryUrl) : undefined
   
   // fetch icons
-  if (isArray(manifest.icons) {
+  if (Array.isArray(manifest.icons)) {
   }
 
   const return_val = {
